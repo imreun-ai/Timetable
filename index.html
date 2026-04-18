@@ -1,13 +1,402 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="./src/main.tsx"></script>
-  </body>
-</html>
+<!DOCTYPE html>
+<html lang="km">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ប្រព័ន្ធរៀបកាលវិភាគស្វ័យប្រវត្តិ</title>
+    
+    <!-- Libraries via CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
 
+    <!-- Custom Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Kantumruy Pro', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 1rem;
+        }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Loading Spinner */
+        #loader {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; display: flex; justify-content: center; align-items: center;
+            z-index: 9999; transition: opacity 0.5s ease;
+        }
+    </style>
+</head>
+<body>
+    <div id="loader">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-600"></div>
+    </div>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+        const { motion, AnimatePresence } = window.Motion;
+
+        // --- Constants ---
+        const DAYS_OF_WEEK = ['ច័ន្ទ', 'អង្គារ', 'ពុធ', 'ព្រហស្បតិ៍', 'សុក្រ', 'សៅរ៍'];
+        const TIME_SLOTS = [
+            { id: '1', time: '07:00 - 07:50', period: 'morning' },
+            { id: '2', time: '07:50 - 08:40', period: 'morning' },
+            { id: '3', time: '08:50 - 09:40', period: 'morning' },
+            { id: '4', time: '09:40 - 10:30', period: 'morning' },
+            { id: '5', time: '10:40 - 11:30', period: 'afternoon' },
+            { id: '6', time: '13:00 - 13:50', period: 'afternoon' },
+            { id: '7', time: '13:50 - 14:40', period: 'afternoon' },
+            { id: '8', time: '14:50 - 15:40', period: 'afternoon' },
+            { id: '9', time: '15:40 - 16:30', period: 'afternoon' },
+            { id: '10', time: '16:40 - 17:30', period: 'afternoon' }
+        ];
+
+        const TEACHER_COLORS = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', 
+            '#F06292', '#AED581', '#FFD54F', '#4DB6AC', '#7986CB'
+        ];
+
+        // --- Helper Components ---
+        const Icon = ({ name, size = 18, className = "" }) => {
+            const IconComponent = lucide[name];
+            return IconComponent ? <IconComponent size={size} className={className} /> : null;
+        };
+
+        const Button = ({ children, onClick, variant = "primary", className = "", icon }) => {
+            const variants = {
+                primary: "bg-blue-600 text-white hover:bg-blue-700",
+                secondary: "bg-gray-200 text-gray-800 hover:bg-gray-300",
+                danger: "bg-red-500 text-white hover:bg-red-600",
+                ghost: "bg-transparent hover:bg-gray-100 text-gray-600"
+            };
+            return (
+                <button 
+                    onClick={onClick}
+                    className={`px-4 py-2 rounded-lg transition-all flex items-center justify-center gap-2 font-medium text-sm ${variants[variant]} ${className}`}
+                >
+                    {icon && <Icon name={icon} size={16} />}
+                    {children}
+                </button>
+            );
+        };
+
+        const Card = ({ children, title, icon, action, className = "" }) => (
+            <div className={`glass-card p-5 mb-6 shadow-sm ${className}`}>
+                {(title || icon) && (
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-bold flex items-center gap-2 text-gray-800">
+                            {icon && <Icon name={icon} className="text-blue-600" />}
+                            {title}
+                        </h2>
+                        {action}
+                    </div>
+                )}
+                {children}
+            </div>
+        );
+
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+                    >
+                        <div className="p-4 border-b flex justify-between items-center">
+                            <h3 className="text-xl font-bold">{title}</h3>
+                            <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full">
+                                <Icon name="X" />
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-y-auto">
+                            {children}
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        };
+
+        // --- App Component ---
+        function App() {
+            const [activeTab, setActiveTab] = useState('summary');
+            const [classes, setClasses] = useState(() => JSON.parse(localStorage.getItem('school_classes') || '[]'));
+            const [subjects, setSubjects] = useState(() => JSON.parse(localStorage.getItem('school_subjects') || '[]'));
+            const [teachers, setTeachers] = useState(() => JSON.parse(localStorage.getItem('school_teachers') || '[]'));
+            const [schedule, setSchedule] = useState(() => JSON.parse(localStorage.getItem('school_schedule') || '[]'));
+            
+            const [editingTeacher, setEditingTeacher] = useState(null);
+            const [searchTeacher, setSearchTeacher] = useState('');
+            const [teacherFormClasses, setTeacherFormClasses] = useState([]);
+            const [teacherFormSubjects, setTeacherFormSubjects] = useState([]);
+
+            useEffect(() => {
+                localStorage.setItem('school_classes', JSON.stringify(classes));
+                localStorage.setItem('school_subjects', JSON.stringify(subjects));
+                localStorage.setItem('school_teachers', JSON.stringify(teachers));
+                localStorage.setItem('school_schedule', JSON.stringify(schedule));
+                document.getElementById('loader').style.opacity = '0';
+                setTimeout(() => document.getElementById('loader').style.display = 'none', 500);
+            }, [classes, subjects, teachers, schedule]);
+
+            // --- Handlers ---
+            const addClass = (grade, group) => {
+                const newClass = { id: Date.now().toString(), grade, group };
+                setClasses([...classes, newClass]);
+            };
+
+            const addSubject = (name, code, hoursPerGrade) => {
+                const newSub = { id: Date.now().toString(), name, code, hoursPerGrade };
+                setSubjects([...subjects, newSub]);
+            };
+
+            const addTeacher = (name, code, availability, assignedClasses, subIds) => {
+                const newTeacher = {
+                    id: Date.now().toString(),
+                    name, code, availability,
+                    assignedClasses, subjects: subIds,
+                    color: TEACHER_COLORS[teachers.length % TEACHER_COLORS.length]
+                };
+                setTeachers([...teachers, newTeacher]);
+            };
+
+            const updateTeacher = (id, name, code, availability, assignedClasses, subIds) => {
+                setTeachers(teachers.map(t => t.id === id ? { ...t, name, code, availability, assignedClasses, subjects: subIds } : t));
+            };
+
+            const deleteTeacher = (id) => setTeachers(teachers.filter(t => t.id !== id));
+
+            const generateSchedule = () => {
+                const newSchedule = [];
+                const teacherHours = {};
+                teachers.forEach(t => teacherHours[t.id] = 0);
+
+                const sortedClasses = [...classes].sort((a, b) => b.grade.localeCompare(a.grade));
+
+                sortedClasses.forEach(cls => {
+                    const classSubjects = subjects.filter(s => s.hoursPerGrade[cls.grade]);
+                    
+                    classSubjects.forEach(sub => {
+                        const requiredHours = Number(sub.hoursPerGrade[cls.grade]);
+                        const eligibleTeachers = teachers.filter(t => t.subjects.includes(sub.id) && t.assignedClasses.includes(cls.id));
+                        
+                        if (eligibleTeachers.length === 0) return;
+
+                        let hoursToAssign = requiredHours;
+                        while (hoursToAssign > 0) {
+                            let assigned = false;
+                            
+                            // Trying to find a gap
+                            for (let day of DAYS_OF_WEEK) {
+                                for (let slot of TIME_SLOTS) {
+                                    const teacher = eligibleTeachers[0]; // Simple logic: pick first
+                                    
+                                    const isSlotBusy = newSchedule.some(s => s.day === day && s.timeSlotId === slot.id && (s.classId === cls.id || s.teacherId === teacher.id));
+                                    const isTeacherAvailable = teacher.availability[day]?.includes(slot.period);
+
+                                    if (!isSlotBusy && isTeacherAvailable) {
+                                        newSchedule.push({
+                                            id: Math.random().toString(36).substr(2, 9),
+                                            classId: cls.id,
+                                            teacherId: teacher.id,
+                                            subjectId: sub.id,
+                                            day,
+                                            timeSlotId: slot.id
+                                        });
+                                        hoursToAssign--;
+                                        assigned = true;
+                                        if (hoursToAssign === 0) break;
+                                    }
+                                }
+                                if (hoursToAssign === 0) break;
+                            }
+                            if (!assigned) break; // Could not assign more
+                        }
+                    });
+                });
+                setSchedule(newSchedule);
+                alert("ការរៀបកាលវិភាគបានជោគជ័យ!");
+            };
+
+            // --- Views ---
+            const SummaryView = () => (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <Card title="សរុបថ្នាក់" icon="GraduationCap">
+                        <p className="text-4xl font-bold text-blue-600">{classes.length}</p>
+                    </Card>
+                    <Card title="សរុបមុខវិជ្ជា" icon="BookOpen">
+                        <p className="text-4xl font-bold text-green-600">{subjects.length}</p>
+                    </Card>
+                    <Card title="សរុបគ្រូ" icon="Users">
+                        <p className="text-4xl font-bold text-orange-600">{teachers.length}</p>
+                    </Card>
+                    <Card title="ម៉ោងសិក្សាសរុប" icon="Calendar">
+                        <p className="text-4xl font-bold text-purple-600">{schedule.length}</p>
+                    </Card>
+                </div>
+            );
+
+            const TeachersView = () => (
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                    <Card title="បន្ថែមគ្រូបង្រៀន" icon="Plus" className="lg:col-span-1">
+                        <div className="space-y-4">
+                            <input id="t-name" placeholder="ឈ្មោះគ្រូ..." className="w-full p-2 border rounded" />
+                            <input id="t-code" placeholder="កូដ..." className="w-full p-2 border rounded" />
+                            <Button className="w-full" onClick={() => {
+                                const name = document.getElementById('t-name').value;
+                                const code = document.getElementById('t-code').value;
+                                if (name && code) {
+                                    addTeacher(name, code, {}, [], []);
+                                    document.getElementById('t-name').value = '';
+                                    document.getElementById('t-code').value = '';
+                                }
+                            }}>បន្ថែម</Button>
+                        </div>
+                    </Card>
+                    <Card title="បញ្ជីគ្រូបង្រៀន" icon="List" className="lg:col-span-3">
+                        <table className="w-full text-left text-sm">
+                            <thead>
+                                <tr className="border-b">
+                                    <th className="p-3">ឈ្មោះ</th>
+                                    <th className="p-3">កូដ</th>
+                                    <th className="p-3 text-right">សកម្មភាព</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {teachers.map(t => (
+                                    <tr key={t.id} className="border-b hover:bg-gray-50/50">
+                                        <td className="p-3 font-bold">{t.name}</td>
+                                        <td className="p-3">{t.code}</td>
+                                        <td className="p-3 text-right">
+                                            <Button variant="ghost" onClick={() => setEditingTeacher(t)} icon="Edit" />
+                                            <Button variant="ghost" className="text-red-500" onClick={() => deleteTeacher(t.id)} icon="Trash2" />
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </Card>
+                </div>
+            );
+
+            const ScheduleView = () => (
+                <Card title="កាលវិភាគបង្រៀន" icon="Calendar" action={
+                    <Button onClick={generateSchedule} icon="RefreshCw">រៀបកាលវិភាគថ្មី</Button>
+                }>
+                    <div className="overflow-x-auto">
+                        <table className="w-full border-collapse text-[10px] md:text-xs">
+                            <thead>
+                                <tr>
+                                    <th className="border p-2 bg-gray-100">ម៉ោង</th>
+                                    {DAYS_OF_WEEK.map(day => <th key={day} className="border p-2 bg-gray-100">{day}</th>)}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {TIME_SLOTS.map(slot => (
+                                    <tr key={slot.id}>
+                                        <td className="border p-2 bg-gray-50 font-bold whitespace-nowrap">{slot.time}</td>
+                                        {DAYS_OF_WEEK.map(day => {
+                                            const entries = schedule.filter(s => s.day === day && s.timeSlotId === slot.id);
+                                            return (
+                                                <td key={day} className="border p-1 min-w-[100px] h-16 align-top">
+                                                    {entries.map(e => {
+                                                        const teacher = teachers.find(t => t.id === e.teacherId);
+                                                        const subject = subjects.find(s => s.id === e.subjectId);
+                                                        return (
+                                                            <div key={e.id} className="p-1 mb-1 rounded text-white shadow-sm" style={{ backgroundColor: teacher?.color || '#ccc' }}>
+                                                                <div className="font-bold">{subject?.name}</div>
+                                                                <div>{teacher?.name}</div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </Card>
+            );
+
+            return (
+                <div className="max-w-7xl mx-auto p-4 md:p-8">
+                    <header className="flex flex-col md:flex-row items-center justify-between mb-8 gap-4">
+                        <div className="flex items-center gap-4">
+                            <div className="p-4 bg-blue-600 rounded-2xl shadow-lg shadow-blue-200">
+                                <Icon name="Calendar" size={32} className="text-white" />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold text-gray-800">ប្រព័ន្ធរៀបកាលវិភាគស្វ័យប្រវត្តិ</h1>
+                                <p className="text-gray-500 text-sm">គ្រប់គ្រងថ្នាក់រៀន និង គ្រូបង្រៀនលឿនរហ័ស</p>
+                            </div>
+                        </div>
+                        <div className="flex bg-white/50 p-1 rounded-xl glass-card">
+                            <button onClick={() => setActiveTab('summary')} className={`px-4 py-2 rounded-lg text-sm transition-all ${activeTab === 'summary' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>សរុប</button>
+                            <button onClick={() => setActiveTab('teachers')} className={`px-4 py-2 rounded-lg text-sm transition-all ${activeTab === 'teachers' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>គ្រូបង្រៀន</button>
+                            <button onClick={() => setActiveTab('schedule')} className={`px-4 py-2 rounded-lg text-sm transition-all ${activeTab === 'schedule' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}>កាលវិភាគ</button>
+                        </div>
+                    </header>
+
+                    <AnimatePresence mode="wait">
+                        <motion.div 
+                            key={activeTab}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                        >
+                            {activeTab === 'summary' && <SummaryView />}
+                            {activeTab === 'teachers' && <TeachersView />}
+                            {activeTab === 'schedule' && <ScheduleView />}
+                        </motion.div>
+                    </AnimatePresence>
+
+                    <footer className="mt-12 text-center text-gray-500 text-xs">
+                        &copy; 2024 ប្រព័ន្ធរៀបកាលវិភាគបង្រៀន - ស្ម៊ាតស្កេតជូល
+                    </footer>
+
+                    {/* Simple Teacher Edit Modal */}
+                    <Modal 
+                        isOpen={!!editingTeacher} 
+                        onClose={() => setEditingTeacher(null)} 
+                        title="កែសម្រួលគ្រូបង្រៀន"
+                    >
+                        {editingTeacher && (
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold mb-1">ឈ្មោះ</label>
+                                    <input 
+                                        defaultValue={editingTeacher.name} 
+                                        className="w-full p-2 border rounded" 
+                                        onChange={e => updateTeacher(editingTeacher.id, e.target.value, editingTeacher.code, editingTeacher.availability, editingTeacher.assignedClasses, editingTeacher.subjects)}
+                                    />
+                                </div>
+                                <Button className="w-full" onClick={() => setEditingTeacher(null)}>រក្សាទុក</Button>
+                            </div>
+                        )}
+                    </Modal>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
